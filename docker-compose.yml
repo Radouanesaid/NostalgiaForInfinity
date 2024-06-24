@@ -335,3 +335,17 @@ services:
           --config configs/exampleconfig.json --breakdown week \
           --config configs/pairlist-backtest-static-${EXCHANGE:-binance}-${TRADING_MODE:-spot}-usdt.json \
           > user_data/backtest_results/${STRATEGY_NAME:-NostalgiaForInfinityX4}-${STRATEGY_VERSION:-latest}-${EXCHANGE:-binance}-${TRADING_MODE:-spot}-${TIMERANGE:-20230101-}.txt
+  livetrade_demo:
+    image: freqtradeorg/freqtrade:stable
+    restart: unless-stopped
+    container_name: live_trade_nostalgiaForInfinity
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+    ports:
+      - "0.0.0.0:8080:8080"
+    command: >
+      trade
+      --logfile /freqtrade/user_data/logs/freqtrade.log
+      --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
+      --config /freqtrade/user_data/exampleconfig.json
+      --strategy NostalgiaForInfinityX4
