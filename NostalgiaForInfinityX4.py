@@ -68,7 +68,7 @@ class NostalgiaForInfinityX4(IStrategy):
   INTERFACE_VERSION = 3
 
   def version(self) -> str:
-    return "v14.1.860"
+    return "v14.1.943"
 
   stoploss = -0.99
 
@@ -109,7 +109,7 @@ class NostalgiaForInfinityX4(IStrategy):
   startup_candle_count: int = 800
 
   # Long Normal mode tags
-  long_normal_mode_tags = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"]
+  long_normal_mode_tags = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14"]
   # Long Pump mode tags
   long_pump_mode_tags = ["21", "22", "23", "24", "25", "26"]
   # Long Quick mode tags
@@ -171,6 +171,10 @@ class NostalgiaForInfinityX4(IStrategy):
   stop_threshold_spot_rapid = 4.0
   stop_threshold_spot_rebuy = 2.0
   stop_threshold_futures_rebuy = 4.0
+
+  # user specified fees to be used for profit calculations
+  custom_fee_open_rate = None
+  custom_fee_close_rate = None
 
   # Rebuy mode minimum number of free slots
   rebuy_mode_min_free_slots = 2
@@ -352,13 +356,11 @@ class NostalgiaForInfinityX4(IStrategy):
     "DOT",
     "XLM",
     "ALGO",
-    "ETH",
     "RNDR",
     "XMR",
     "AVAX",
     "NEAR",
     "DOGE",
-    "BCH",
     "ETC",
     "FTM",
     "KAS",
@@ -408,6 +410,7 @@ class NostalgiaForInfinityX4(IStrategy):
     "long_entry_condition_11_enable": True,
     "long_entry_condition_12_enable": True,
     "long_entry_condition_13_enable": True,
+    "long_entry_condition_14_enable": True,
     "long_entry_condition_21_enable": True,
     "long_entry_condition_22_enable": True,
     "long_entry_condition_23_enable": True,
@@ -448,7 +451,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Enable/Disable conditions
     # -------------------------------------------------------
     "short_entry_condition_500_enable": True,
-    "short_entry_condition_501_enable": False,
+    "short_entry_condition_501_enable": True,
   }
 
   buy_protection_params = {}
@@ -504,7 +507,7 @@ class NostalgiaForInfinityX4(IStrategy):
   entry_24_r_14_max = DecimalParameter(-100.0, 80.0, default=-97.0, decimals=0, space="buy", optimize=True)
   entry_24_ewo_50_200_min = DecimalParameter(2.0, 10.0, default=7.0, decimals=1, space="buy", optimize=True)
   entry_24_ewo_50_200_max = DecimalParameter(10.0, 30.0, default=24.0, decimals=1, space="buy", optimize=True)
-  entry_24_sma_offset = DecimalParameter(0.960, 0.999, default=0.978, decimals=3, space="buy", optimize=True)
+  entry_24_sma_offset = DecimalParameter(0.960, 0.999, default=0.972, decimals=3, space="buy", optimize=True)
 
   entry_25_close_max_12 = DecimalParameter(00.50, 0.95, default=0.80, decimals=2, space="buy", optimize=False)
   entry_25_close_max_24 = DecimalParameter(00.50, 0.95, default=0.75, decimals=2, space="buy", optimize=False)
@@ -634,7 +637,7 @@ class NostalgiaForInfinityX4(IStrategy):
   entry_45_rsi_14_min = DecimalParameter(10.0, 40.0, default=26.0, decimals=0, space="buy", optimize=False)
   entry_45_rsi_14_max = DecimalParameter(20.0, 60.0, default=40.0, decimals=0, space="buy", optimize=False)
   entry_45_cti_20_max = DecimalParameter(-0.99, -0.50, default=-0.54, decimals=2, space="buy", optimize=False)
-  entry_45_sma_offset = DecimalParameter(0.940, 0.984, default=0.954, decimals=3, space="buy", optimize=False)
+  entry_45_sma_offset = DecimalParameter(0.940, 0.984, default=0.952, decimals=3, space="buy", optimize=False)
 
   entry_46_close_max_12 = DecimalParameter(00.50, 0.95, default=0.80, decimals=2, space="buy", optimize=False)
   entry_46_close_max_24 = DecimalParameter(00.50, 0.95, default=0.75, decimals=2, space="buy", optimize=False)
@@ -1279,6 +1282,11 @@ class NostalgiaForInfinityX4(IStrategy):
     if "regular_mode_derisk_futures_old" in self.config:
       self.regular_mode_derisk_futures_old = self.config["regular_mode_derisk_futures_old"]
 
+    if "custom_fee_open_rate" in self.config:
+      self.custom_fee_open_rate = self.config["custom_fee_open_rate"]
+    if "custom_fee_close_rate" in self.config:
+      self.custom_fee_close_rate = self.config["custom_fee_close_rate"]
+
     if "futures_mode_leverage" in self.config:
       self.futures_mode_leverage = self.config["futures_mode_leverage"]
     if "futures_mode_leverage_rebuy_mode" in self.config:
@@ -1508,35 +1516,38 @@ class NostalgiaForInfinityX4(IStrategy):
     :param exit_rate: The exit rate.
     :return tuple: The total profit in stake, ratio, ratio based on current stake, and ratio based on the first entry stake.
     """
+    fee_open_rate = trade.fee_open if self.custom_fee_open_rate is None else self.custom_fee_open_rate
+    fee_close_rate = trade.fee_close if self.custom_fee_close_rate is None else self.custom_fee_close_rate
+
     total_amount = 0.0
     total_stake = 0.0
     total_profit = 0.0
     current_stake = 0.0
     for entry_order in filled_entries:
       if trade.is_short:
-        entry_stake = entry_order.safe_filled * entry_order.safe_price * (1 - trade.fee_open)
+        entry_stake = entry_order.safe_filled * entry_order.safe_price * (1 - fee_open_rate)
         total_amount += entry_order.safe_filled
         total_stake += entry_stake
         total_profit += entry_stake
       else:
-        entry_stake = entry_order.safe_filled * entry_order.safe_price * (1 + trade.fee_open)
+        entry_stake = entry_order.safe_filled * entry_order.safe_price * (1 + fee_open_rate)
         total_amount += entry_order.safe_filled
         total_stake += entry_stake
         total_profit -= entry_stake
     for exit_order in filled_exits:
       if trade.is_short:
-        exit_stake = exit_order.safe_filled * exit_order.safe_price * (1 + trade.fee_close)
+        exit_stake = exit_order.safe_filled * exit_order.safe_price * (1 + fee_close_rate)
         total_amount -= exit_order.safe_filled
         total_profit -= exit_stake
       else:
-        exit_stake = exit_order.safe_filled * exit_order.safe_price * (1 - trade.fee_close)
+        exit_stake = exit_order.safe_filled * exit_order.safe_price * (1 - fee_close_rate)
         total_amount -= exit_order.safe_filled
         total_profit += exit_stake
     if trade.is_short:
-      current_stake = total_amount * exit_rate * (1 + trade.fee_close)
+      current_stake = total_amount * exit_rate * (1 + fee_close_rate)
       total_profit -= current_stake
     else:
-      current_stake = total_amount * exit_rate * (1 - trade.fee_close)
+      current_stake = total_amount * exit_rate * (1 - fee_close_rate)
       total_profit += current_stake
     if self.is_futures_mode:
       total_profit += trade.funding_fees
@@ -12465,6 +12476,136 @@ class NostalgiaForInfinityX4(IStrategy):
         | (df["hl_pct_change_6_1d"] < 0.9)
         | (((df["close"] - df["low_min_48_1h"]) / df["low_min_48_1h"]) < (df["hl_pct_change_48_1h"] * 0.38))
       )
+      & (
+        (df["change_pct_1d"] < 0.08)
+        | (df["top_wick_pct_1d"] < 0.08)
+        | (df["not_downtrend_15m"])
+        | (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3_15m"] > 12.0)
+        | (df["rsi_14_1h"] < 46.0)
+        | (df["rsi_14_4h"] < 50.0)
+        | (df["rsi_14_1d"] < 50.0)
+        | (df["r_480_1h"] < -25.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["close"] < df["res_hlevel_1d"])
+        | (((df["close"] - df["low_min_6_1d"]) / df["low_min_6_1d"]) < (df["hl_pct_change_6_1d"] * 0.38))
+      )
+      & (
+        (df["change_pct_1d"] < 0.06)
+        | (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3"] > 12.0)
+        | (df["rsi_3_15m"] > 16.0)
+        | (df["rsi_3_1h"] > 36.0)
+        | (df["rsi_14_1h"] < 46.0)
+        | (df["rsi_14_max_6_1h"] < 70.0)
+        | (df["rsi_14_4h"] < 65.0)
+        | (df["close"] < df["res_hlevel_4h"])
+        | (df["close"] < df["res_hlevel_1d"])
+        | (((df["close"] - df["low_min_48_1h"]) / df["low_min_48_1h"]) < (df["hl_pct_change_48_1h"] * 0.38))
+      )
+      & (
+        (df["not_downtrend_1h"])
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3_1h"] > 20.0)
+        | (df["r_14"] < -80.0)
+        | (df["rsi_14"] < 36.0)
+        | (df["rsi_14_1h"] < 40.0)
+        | (df["rsi_14_4h"] < 50.0)
+        | (df["rsi_14_1d"] < 70.0)
+        | (df["r_14_4h"] < -35.0)
+        | (df["r_480_1h"] < -35.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["hl_pct_change_6_1d"] < 1.2)
+        | (((df["close"] - df["low_min_48_1h"]) / df["low_min_48_1h"]) < (df["hl_pct_change_48_1h"] * 0.38))
+      )
+      & (
+        (df["not_downtrend_1h"])
+        | (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3"] > 4.0)
+        | (df["rsi_3_15m"] > 16.0)
+        | (df["rsi_3_1h"] > 30.0)
+        | (df["rsi_14_1h"] < 40.0)
+        | (df["rsi_14_4h"] < 46.0)
+        | (df["rsi_14_1d"] < 50.0)
+        | (df["hl_pct_change_6_1d"] < 1.2)
+        | (df["close"] > (df["high_max_6_1d"] * 0.55))
+        | (((df["close"] - df["low_min_48_1h"]) / df["low_min_48_1h"]) < (df["hl_pct_change_48_1h"] * 0.38))
+      )
+      & (
+        (df["change_pct_1h"] > -0.01)
+        | (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3"] > 26.0)
+        | (df["rsi_3_15m"] > 26.0)
+        | (df["rsi_14_1h"] < 50.0)
+        | (df["rsi_14_max_6_1h"] < 70.0)
+        | (df["rsi_14_4h"] < 60.0)
+        | (df["r_480_1h"] < -20.0)
+        | (df["r_480_4h"] < -20.0)
+        | (df["close"] < df["res_hlevel_1h"])
+        | (((df["close"] - df["low_min_6_1d"]) / df["low_min_6_1d"]) < (df["hl_pct_change_6_1d"] * 0.38))
+      )
+      & (
+        (df["not_downtrend_1h"])
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3_1h"] > 36.0)
+        | (df["rsi_3_4h"] > 36.0)
+        | (df["rsi_14_max_6_4h"] < 65.0)
+        | (df["rsi_14_4h"] < 50.0)
+        | (df["cti_20_4h"] < 0.7)
+        | (df["rsi_14_1d"] < 50.0)
+        | (df["r_14_1h"] > -80.0)
+        | (df["r_480_1h"] < -40.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["hl_pct_change_6_1d"] < 0.9)
+        | (df["close"] > (df["high_max_24_1h"] * 0.86))
+        | (((df["close"] - df["low_min_6_1d"]) / df["low_min_6_1d"]) < (df["hl_pct_change_6_1d"] * 0.38))
+      )
+      & (
+        (df["not_downtrend_15m"])
+        | (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3_15m"] > 12.0)
+        | (df["rsi_14_15m"] < 30.0)
+        | (df["rsi_14_1h"] < 40.0)
+        | (df["rsi_14_4h"] < 50.0)
+        | (df["cti_20_4h"] < 0.8)
+        | (df["rsi_14_1d"] < 50.0)
+        | (df["r_480_1h"] < -30.0)
+        | (df["r_480_4h"] < -20.0)
+        | (df["close"] > df["sup_level_1h"])
+      )
+      & (
+        (df["change_pct_1d"] < 0.12)
+        | (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3"] > 8.0)
+        | (df["rsi_3_15m"] > 30.0)
+        | (df["rsi_14_15m"] < 40.0)
+        | (df["rsi_14_1h"] < 50.0)
+        | (df["rsi_14_max_6_1h"] < 65.0)
+        | (df["rsi_14_4h"] < 50.0)
+        | (df["close"] < df["res_hlevel_4h"])
+        | (((df["close"] - df["low_min_48_1h"]) / df["low_min_48_1h"]) < (df["hl_pct_change_48_1h"] * 0.38))
+      )
+      & (
+        (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3"] > 16.0)
+        | (df["rsi_3_15m"] > 16.0)
+        | (df["rsi_14_1h"] < 50.0)
+        | (df["cti_20_1h"] < 0.7)
+        | (df["rsi_14_4h"] < 50.0)
+        | (df["rsi_14_1d"] < 50.0)
+        | (df["rsi_14_max_6_1d"] < 80.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["close"] < df["res_hlevel_4h"])
+        | (df["hl_pct_change_6_1d"] < 1.9)
+        | (((df["close"] - df["low_min_48_1h"]) / df["low_min_48_1h"]) < (df["hl_pct_change_48_1h"] * 0.38))
+      )
     )
 
     df["global_protections_long_dump"] = (
@@ -14944,6 +15085,283 @@ class NostalgiaForInfinityX4(IStrategy):
         | (df["close"] > df["sup_level_4h"])
         | (df["close"] > df["sup_level_1d"])
       )
+      & (
+        (df["change_pct_1d"] > -0.01)
+        | (df["top_wick_pct_1d"] < 0.08)
+        | (df["change_pct_1d"].shift(288) < 0.20)
+        | (df["change_pct_1h"] < 0.06)
+        | (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_3"] > 26.0)
+        | (df["rsi_14_15m"] < 50.0)
+        | (df["rsi_14_1h"] < 50.0)
+        | (df["rsi_14_4h"] < 50.0)
+        | (df["r_480_1h"] > -60.0)
+        | (df["r_480_4h"] > -60.0)
+        | (((df["close"] - df["low_min_6_1d"]) / df["low_min_6_1d"]) < (df["hl_pct_change_6_1d"] * 0.38))
+      )
+      & (
+        (df["change_pct_1d"] < 0.16)
+        | (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_14_1h"] < 50.0)
+        | (df["rsi_14_4h"] < 60.0)
+        | (df["rsi_14_max_6_4h"] < 80.0)
+        | (df["r_480_4h"] > -70.0)
+        | (df["close"] < df["res_hlevel_1h"])
+        | (df["ema_200_dec_24_4h"] == False)
+        | (df["ema_200_dec_4_1d"] == False)
+        | (((df["close"] - df["low_min_48_1h"]) / df["low_min_48_1h"]) < (df["hl_pct_change_48_1h"] * 0.38))
+      )
+      & (
+        (df["change_pct_1d"] > -0.16)
+        | (df["not_downtrend_4h"])
+        | (df["not_downtrend_1d"])
+        | (df["rsi_3_4h"] > 16.0)
+        | (df["r_480_1h"] > -90.0)
+        | (df["close"] > df["sup_level_4h"])
+        | (df["close"] > (df["high_max_48_1h"] * 0.70))
+      )
+      & (
+        (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3_15m"] > 36.0)
+        | (df["r_14"] < -80.0)
+        | (df["rsi_14_1h"] < 50.0)
+        | (df["rsi_14_4h"] < 50.0)
+        | (df["r_14_1h"] < -60.0)
+        | (df["r_14_4h"] < -25.0)
+        | (df["r_480_1h"] > -70.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["close"] > df["sup_level_4h"])
+        | (df["close"] > df["sup_level_1d"])
+        | (df["ema_200_dec_48_1h"] == False)
+        | (df["ema_200_dec_24_4h"] == False)
+      )
+      & (
+        (df["change_pct"].rolling(6).min() > -0.04)
+        | (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3_15m"] > 20.0)
+        | (df["rsi_14"] < 20.0)
+        | (df["rsi_14_15m"] < 20.0)
+        | (df["rsi_14_1h"] < 50.0)
+        | (df["rsi_14_4h"] < 50.0)
+        | (df["r_14_1h"] < -35.0)
+        | (df["r_14_4h"] < -35.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["close"] > df["sup_level_4h"])
+        | (df["close"] > df["sup_level_1d"])
+        | (df["ema_200_dec_24_4h"] == False)
+        | (df["ema_200_dec_4_1d"] == False)
+      )
+      & (
+        (df["change_pct_4h"] > -0.02)
+        | (df["change_pct_4h"].shift(48) < 0.02)
+        | (df["not_downtrend_1h"])
+        | (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3"] > 26.0)
+        | (df["rsi_3_15m"] > 8.0)
+        | (df["rsi_3_1h"] > 30.0)
+        | (df["r_14"] < -95.0)
+        | (df["rsi_14_4h"] < 40.0)
+        | (df["r_14_1h"] < -95.0)
+        | (df["r_14_4h"] < -95.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["close"] > df["sup_level_4h"])
+      )
+      & (
+        (df["not_downtrend_1h"])
+        | (df["not_downtrend_4h"])
+        | (df["not_downtrend_1d"])
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3_1h"] > 10.0)
+        | (df["rsi_3_4h"] > 26.0)
+        | (df["r_14_1h"] < -95.0)
+        | (df["r_14_4h"] < -95.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["close"] > df["sup_level_4h"])
+        | (df["ema_200_dec_48_1h"] == False)
+      )
+      & (
+        (df["change_pct_1d"] > -0.10)
+        | (df["not_downtrend_1h"])
+        | (df["not_downtrend_4h"])
+        | (df["not_downtrend_1d"])
+        | (df["rsi_3_1h"] > 30.0)
+        | (df["rsi_3_4h"] > 36.0)
+        | (df["rsi_14"] < 25.0)
+        | (df["rsi_14_15m"] < 30.0)
+        | (df["r_14_1h"] < -95.0)
+        | (df["r_14_4h"] < -95.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["close"] > df["sup_level_4h"])
+      )
+      & (
+        (df["change_pct_1d"] > -0.10)
+        | (df["not_downtrend_1h"])
+        | (df["not_downtrend_1d"])
+        | (df["rsi_3"] > 12.0)
+        | (df["rsi_3_15m"] > 30.0)
+        | (df["rsi_14_15m"] < 36.0)
+        | (df["rsi_14_1h"] < 40.0)
+        | (df["rsi_14_4h"] < 40.0)
+        | (df["r_14_1h"] < -80.0)
+        | (df["r_14_4h"] < -80.0)
+        | (df["close"] > df["sup_level_4h"])
+      )
+      & (
+        (df["change_pct_1h"] > -0.01)
+        | (df["change_pct_1h"].shift(12) < 0.04)
+        | (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3"] > 16.0)
+        | (df["rsi_14_15m"] < 46.0)
+        | (df["rsi_14_1h"] < 46.0)
+        | (df["rsi_14_4h"] < 46.0)
+        | (df["r_14_1h"] < -80.0)
+        | (df["r_14_4h"] < -80.0)
+        | (df["r_480_1h"] > -70.0)
+        | (df["ema_200_dec_48_1h"] == False)
+        | (df["ema_200_dec_24_4h"] == False)
+      )
+      & (
+        (df["change_pct_4h"] < 0.06)
+        | (df["change_pct_1h"] > -0.01)
+        | (df["change_pct_1h"].shift(12) < 0.01)
+        | (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3_15m"] > 20.0)
+        | (df["rsi_14_15m"] < 36.0)
+        | (df["rsi_14_1h"] < 50.0)
+        | (df["rsi_14_1h"].shift(12) < 70.0)
+        | (df["rsi_14_4h"] < 50.0)
+        | (df["ema_200_dec_48_1h"] == False)
+        | (df["ema_200_dec_24_4h"] == False)
+      )
+      & (
+        (df["not_downtrend_4h"])
+        | (df["is_downtrend_3_4h"] == False)
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3_4h"] > 10.0)
+        | (df["r_14_1h"] > -80.0)
+        | (df["r_14_4h"] > -80.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["close"] > df["sup_level_4h"])
+        | (df["ema_12_1h"] > df["ema_26_1h"])
+      )
+      & (
+        (df["change_pct_4h"] < 0.04)
+        | (df["change_pct_1h"] > -0.01)
+        | (df["rsi_3"] > 6.0)
+        | (df["rsi_14_15m"] < 50.0)
+        | (df["rsi_14_1h"] < 60.0)
+        | (df["rsi_14_1h"].shift(12) < 70.0)
+        | (df["rsi_14_4h"] < 60.0)
+        | (df["ema_200_dec_24_4h"] == False)
+        | (df["ema_200_dec_4_1d"] == False)
+      )
+      & (
+        (df["change_pct_1d"] < 0.20)
+        | (df["not_downtrend_1h"])
+        | (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3"] > 26.0)
+        | (df["rsi_3_15m"] > 26.0)
+        | (df["rsi_14_15m"] < 36.0)
+        | (df["rsi_14_1h"] < 40.0)
+        | (df["rsi_14_4h"] < 46.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["close"] > df["sup_level_4h"])
+      )
+      & (
+        (df["change_pct_1d"] < 0.04)
+        | (df["top_wick_pct_1d"] < 0.04)
+        | (df["rsi_14"] > df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+        | (df["rsi_3_15m"] > 26.0)
+        | (df["rsi_14_15m"] > 30.0)
+        | (df["rsi_14_1h"] < 50.0)
+        | (df["rsi_14_4h"] < 50.0)
+        | (df["cti_20_4h"] < 0.8)
+        | (df["r_480_1h"] > -70.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["close"] > df["sup_level_4h"])
+        | (df["ema_200_dec_48_1h"] == False)
+        | (df["sma_200_dec_48_1h"] == False)
+      )
+      & (
+        (df["not_downtrend_15m"])
+        | (df["not_downtrend_4h"])
+        | (df["not_downtrend_1h"])
+        | (df["rsi_3_15m"] > 4.0)
+        | (df["rsi_3_1h"] > 12.0)
+        | (df["rsi_3_4h"] > 16.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["close"] > df["sup_level_4h"])
+      )
+      & (
+        (df["not_downtrend_4h"])
+        | (df["not_downtrend_1d"])
+        | (df["r_480_1h"] > -85.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["close"] > df["sup_level_4h"])
+        | (df["sma_200_dec_48_1h"] == False)
+        | (df["ema_200_dec_48_1h"] == False)
+        | (df["ema_200_dec_24_4h"] == False)
+      )
+      & (
+        (df["not_downtrend_1d"])
+        | (df["rsi_3"] > 16.0)
+        | (df["rsi_14_15m"] < 46.0)
+        | (df["rsi_14_1h"] < 46.0)
+        | (df["rsi_14_4h"] < 46.0)
+        | (df["r_480_1h"] > -70.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["close"] > df["sup_level_4h"])
+        | (df["close"] > df["sup_level_1d"])
+        | (df["sma_200_dec_48_1h"] == False)
+        | (df["ema_200_dec_48_1h"] == False)
+        | (df["ema_200_dec_24_4h"] == False)
+      )
+      & (
+        (df["not_downtrend_15m"])
+        | (df["not_downtrend_1d"])
+        | (df["rsi_3"] > 10.0)
+        | (df["rsi_3_15m"] > 20.0)
+        | (df["rsi_14_15m"] < 36.0)
+        | (df["rsi_14_1h"] < 46.0)
+        | (df["rsi_14_4h"] < 46.0)
+        | (df["close"] > df["sup_level_1h"])
+        | (df["sma_200_dec_48_1h"] == False)
+        | (df["ema_200_dec_48_1h"] == False)
+      )
+      & (
+        (df["change_pct_1d"] > -0.04)
+        | (df["top_wick_pct_1d"] < 0.04)
+        | (df["change_pct_1d"].shift(288) < 0.24)
+        | (df["not_downtrend_1h"])
+        | (df["rsi_3"] > 20.0)
+        | (df["rsi_3_15m"] > 20.0)
+        | (df["rsi_14_15m"] < 36.0)
+        | (df["rsi_14_1h"] < 40.0)
+        | (df["rsi_14_4h"] < 40.0)
+        | (df["r_480_1h"] > -65.0)
+        | (df["sma_200_dec_48_1h"] == False)
+        | (df["ema_200_dec_48_1h"] == False)
+      )
+      & (
+        (df["not_downtrend_4h"])
+        | (df["not_downtrend_1d"])
+        | (df["rsi_3"] > 12.0)
+        | (df["rsi_3_4h"] > 30.0)
+        | (df["rsi_14_15m"] < 40.0)
+        | (df["rsi_14_1h"] < 40.0)
+        | (df["rsi_14_4h"] < 40.0)
+        | (df["r_480_1h"] > -75.0)
+        | (df["close"] > df["sup_level_4h"])
+        | (df["sma_200_dec_48_1h"] == False)
+        | (df["ema_200_dec_48_1h"] == False)
+      )
     )
 
     # Global protections
@@ -15218,20 +15636,137 @@ class NostalgiaForInfinityX4(IStrategy):
         | (df["close"] < df["res_hlevel_1d"])
         | (df["hl_pct_change_6_1d"] < 0.9)
       )
+      & (
+        (df["change_pct_1d"] < 0.30)
+        | (df["rsi_14"] < df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] < df["rsi_14_15m"].shift(12))
+        | (df["rsi_3"] < 85.0)
+        | (df["rsi_3_15m"] < 90.0)
+        | (df["rsi_3_4h"] < 90.0)
+        | (df["rsi_14_1h"] > 90.0)
+        | (df["rsi_14_4h"] > 90.0)
+        | (df["close"] < df["res_hlevel_1h"])
+        | (df["close"] < df["res_hlevel_4h"])
+      )
+      & (
+        (df["change_pct_1d"] < 0.20)
+        | (df["change_pct_4h"] < 0.08)
+        | (df["change_pct_1h"] < 0.04)
+        | (df["rsi_14"] < df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] < df["rsi_14_15m"].shift(12))
+        | (df["rsi_3_1h"] < 90.0)
+        | (df["rsi_3_4h"] < 90.0)
+        | (df["rsi_3_1d"] < 90.0)
+        | (df["close"] < df["res_hlevel_1h"])
+        | (df["close"] < df["res_hlevel_4h"])
+        | (df["close"] < df["res_hlevel_1d"])
+      )
+      & (
+        (df["change_pct_4h"] < 0.04)
+        | (df["change_pct_1h"] < 0.03)
+        | (df["rsi_14"] < df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] < df["rsi_14_15m"].shift(12))
+        | (df["rsi_14_15m"] > 70.0)
+        | (df["rsi_3_1h"] < 70.0)
+        | (df["rsi_3_4h"] < 70.0)
+        | (df["r_480_1h"] > -65.0)
+        | (df["close"] < df["res_hlevel_1h"])
+        | (df["close"] < df["res_hlevel_4h"])
+      )
+      & (
+        (df["change_pct_1d"] < 0.08)
+        | (df["change_pct_4h"] < 0.01)
+        | (df["change_pct_1h"] < 0.01)
+        | (df["rsi_14"] < df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] < df["rsi_14_15m"].shift(12))
+        | (df["rsi_3_15m"] < 90.0)
+        | (df["rsi_3_1h"] < 85.0)
+        | (df["rsi_3_4h"] < 70.0)
+        | (df["close"] < df["res_hlevel_4h"])
+        | (df["close"] < df["res_hlevel_1d"])
+      )
+      & (
+        (df["change_pct_4h"] < 0.02)
+        | (df["change_pct_1h"] < 0.01)
+        | (df["rsi_14"] < df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] < df["rsi_14_15m"].shift(12))
+        | (df["rsi_3_15m"] < 80.0)
+        | (df["rsi_3_1h"] < 70.0)
+        | (df["rsi_14_1h"] > 55.0)
+        | (df["rsi_14_4h"] > 50.0)
+        | (df["close"] < df["res_hlevel_1h"])
+        | (df["hl_pct_change_6_1d"] < 1.9)
+      )
     )
 
     df["global_protections_short_dump"] = (
-      (df["change_pct_1d"] < 0.10)
-      | (df["change_pct_1h"] < 0.02)
-      | (df["rsi_14"] < df["rsi_14"].shift(12))
-      | (df["rsi_14_15m"] < df["rsi_14_15m"].shift(12))
-      | (df["rsi_3"] < 80.0)
-      | (df["rsi_3_15m"] < 74.0)
-      | (df["rsi_3_1h"] < 86.0)
-      | (df["rsi_14_1h"] > 70.0)
-      | (df["rsi_14_4h"] > 60.0)
-      | (df["close"] < df["res_hlevel_1h"])
-      | (df["close"] < df["res_hlevel_4h"])
+      (
+        (df["change_pct_1d"] < 0.10)
+        | (df["change_pct_1h"] < 0.02)
+        | (df["rsi_14"] < df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] < df["rsi_14_15m"].shift(12))
+        | (df["rsi_3"] < 80.0)
+        | (df["rsi_3_15m"] < 74.0)
+        | (df["rsi_3_1h"] < 86.0)
+        | (df["rsi_14_1h"] > 70.0)
+        | (df["rsi_14_4h"] > 60.0)
+        | (df["close"] < df["res_hlevel_1h"])
+        | (df["close"] < df["res_hlevel_4h"])
+      )
+      & (
+        (df["change_pct_1d"] < 0.12)
+        | (df["change_pct_1d"].shift(288) > -0.12)
+        | (df["rsi_14_4h"] > 64.0)
+        | (df["rsi_14_1d"] > 40.0)
+        | (df["close"] < df["res_hlevel_1h"])
+        | (df["close"] < df["res_hlevel_4h"])
+      )
+      & (
+        (df["change_pct_1d"] > -0.04)
+        | (df["change_pct_4h"] < 0.01)
+        | (df["change_pct_1h"] < 0.01)
+        | (df["not_downtrend_1d"])
+        | (df["rsi_14"] < df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] < df["rsi_14_15m"].shift(12))
+        | (df["rsi_3"] < 74.0)
+        | (df["rsi_14_15m"] > 70.0)
+        | (df["rsi_14_1h"] > 45.0)
+        | (df["rsi_14_4h"] > 35.0)
+        | (df["r_480_1h"] > -85.0)
+        | (df["r_480_4h"] > -90.0)
+      )
+      & (
+        (df["change_pct_1d"] > -0.24)
+        | (df["change_pct_1h"] < 0.01)
+        | (df["rsi_14"] < df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] < df["rsi_14_15m"].shift(12))
+        | (df["rsi_3"] < 80.0)
+        | (df["rsi_14_15m"] > 90.0)
+        | (df["rsi_14_1h"] > 60.0)
+        | (df["rsi_14_4h"] > 45.0)
+        | (df["r_480_1h"] > -75.0)
+        | (df["r_480_4h"] > -65.0)
+      )
+      & (
+        (df["change_pct_1h"] < 0.16)
+        | (df["not_downtrend_1d"])
+        | (df["rsi_3_15m"] < 75.0)
+        | (df["rsi_14_1h"] > 45.0)
+        | (df["rsi_14_4h"] > 45.0)
+      )
+      & (
+        (df["change_pct_1d"] > -0.03)
+        | (df["change_pct_1h"] < 0.01)
+        | (df["not_downtrend_1d"])
+        | (df["rsi_14"] < df["rsi_14"].shift(12))
+        | (df["rsi_14_15m"] < df["rsi_14_15m"].shift(12))
+        | (df["rsi_14_15m"] > 70.0)
+        | (df["rsi_14_1h"] > 55.0)
+        | (df["rsi_14_4h"] > 35.0)
+        | (df["r_480_1h"] > -80.0)
+        | (df["r_480_4h"] > -75.0)
+        | (df["close"] > (df["high_max_6_1d"] * 0.60))
+      )
     )
 
     df["protections_short_rebuy"] = True
@@ -16302,12 +16837,291 @@ class NostalgiaForInfinityX4(IStrategy):
             | (df["hl_pct_change_6_1d"] < 0.9)
             | (((df["close"] - df["low_min_48_1h"]) / df["low_min_48_1h"]) < (df["hl_pct_change_48_1h"] * 0.38))
           )
+          long_entry_logic.append(
+            (df["rsi_14"] > df["rsi_14"].shift(12))
+            | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+            | (df["rsi_3_15m"] > 20.0)
+            | (df["rsi_14_1h"] < 50.0)
+            | (df["rsi_14_4h"] < 50.0)
+            | (df["r_14_1h"] < -35.0)
+            | (df["r_14_4h"] < -35.0)
+            | (df["close"] > df["sup_level_1h"])
+            | (df["close"] > df["sup_level_4h"])
+            | (df["close"] > df["sup_level_1d"])
+            | (df["ema_200_dec_24_4h"] == False)
+            | (df["ema_200_dec_4_1d"] == False)
+          )
 
           # Logic
           long_entry_logic.append(df["ema_26"] > df["ema_12"])
           long_entry_logic.append((df["ema_26"] - df["ema_12"]) > (df["open"] * 0.0150))
           long_entry_logic.append((df["ema_26"].shift() - df["ema_12"].shift()) > (df["open"] / 100))
           long_entry_logic.append(df["close"] < (df["bb20_2_low"] * 0.994))
+
+        # Condition #14 - Normal mode (Long)
+        if index == 14:
+          # Protections
+          long_entry_logic.append(df["num_empty_288"] < allowed_empty_candles)
+
+          long_entry_logic.append(df["rsi_3"] >= 2.0)
+          long_entry_logic.append(df["rsi_3"] <= 46.0)
+          long_entry_logic.append(df["rsi_3_15m"] >= 12.0)
+          long_entry_logic.append(df["rsi_3_1h"] >= 12.0)
+          long_entry_logic.append(df["rsi_3_4h"] >= 12.0)
+          long_entry_logic.append(df["rsi_14_1d"] < 85.0)
+          long_entry_logic.append(df["r_14_4h"] < -16.0)
+
+          long_entry_logic.append(
+            (df["rsi_14_4h"] < 75.0) | (df["rsi_14_1h"].shift(12) < 70.0) | (df["not_downtrend_1h"])
+          )
+          long_entry_logic.append(
+            (df["change_pct_1h"] > -0.02)
+            | (df["not_downtrend_1d"])
+            | (df["rsi_14"] > df["rsi_14"].shift(12))
+            | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+            | (df["rsi_3"] > 30.0)
+            | (df["rsi_3_1d"] > 26.0)
+            | (df["rsi_14_1h"] < 33.0)
+            | (df["rsi_14_4h"] < 33.0)
+            | (df["sma_200_dec_48_1h"] == False)
+            | (df["ema_200_dec_48_1h"] == False)
+          )
+          long_entry_logic.append(
+            (df["change_pct_1d"] < 0.20)
+            | (df["not_downtrend_1h"])
+            | (df["rsi_3"] > 26.0)
+            | (df["rsi_3_15m"] > 26.0)
+            | (df["rsi_14_1h"] < 36.0)
+            | (df["rsi_14_4h"] < 46.0)
+            | (df["close"] > df["sup_level_1h"])
+            | (df["close"] > df["sup_level_4h"])
+          )
+          long_entry_logic.append(
+            (df["change_pct_1d"] < 0.20)
+            | (df["rsi_3"] > 12.0)
+            | (df["rsi_3_15m"] > 20.0)
+            | (df["rsi_3_1h"] > 20.0)
+            | (df["rsi_14_1h"] < 46.0)
+            | (df["rsi_14_max_6_1h"] < 65.0)
+            | (df["rsi_14_4h"] < 50.0)
+            | (df["r_480_1h"] < -30.0)
+            | (df["r_480_4h"] < -30.0)
+          )
+          long_entry_logic.append(
+            (df["not_downtrend_15m"])
+            | (df["rsi_3"] > 8.0)
+            | (df["rsi_3_15m"] > 26.0)
+            | (df["close"] < (df["bb20_2_low"] * 0.992))
+            | (df["close"] < (df["ema_20"] * 0.954))
+            | (df["close_15m"] < (df["ema_12_15m"] * 0.974))
+          )
+          long_entry_logic.append(
+            (df["change_pct_1h"] > -0.04)
+            | (df["not_downtrend_1h"])
+            | (df["r_480_1h"] > -75.0)
+            | (df["r_480_4h"] > -90.0)
+            | (df["sma_200_dec_48_1h"] == False)
+            | (df["ema_200_dec_48_1h"] == False)
+            | (df["ema_200_dec_24_4h"] == False)
+            | (df["ema_200_dec_4_1d"] == False)
+          )
+          long_entry_logic.append(
+            (df["rsi_3"] > 16.0)
+            | (df["rsi_3_15m"] > 30.0)
+            | (df["rsi_14_1h"] < 60.0)
+            | (df["rsi_14_4h"] < 65.0)
+            | (df["rsi_14_1d"] < 65.0)
+            | (df["r_480_1h"] < -35.0)
+            | (df["ema_200_dec_4_1d"] == False)
+          )
+          long_entry_logic.append(
+            (df["change_pct_1d"] < 0.24)
+            | (df["change_pct_1h"] > -0.01)
+            | (df["rsi_3_15m"] > 30.0)
+            | (df["rsi_3_1h"] > 36.0)
+            | (df["rsi_14_1h"] < 40.0)
+            | (df["rsi_14_max_6_1h"] < 65.0)
+            | (df["rsi_14_4h"] < 65.0)
+            | (df["cti_20_4h"] < 0.8)
+            | (df["close"] < (df["bb20_2_low"] * 0.998))
+            | (df["close"] < (df["ema_20"] * 0.936))
+            | (df["close_15m"] < (df["ema_12_15m"] * 0.936))
+          )
+          long_entry_logic.append(
+            (df["change_pct_1d"] > -0.16)
+            | (df["change_pct_1d"].shift(288) < 0.24)
+            | (df["rsi_3"] > 8.0)
+            | (df["rsi_3_15m"] > 20.0)
+            | (df["rsi_14_1h"] < 36.0)
+            | (df["rsi_14_4h"] < 46.0)
+          )
+          long_entry_logic.append(
+            (df["change_pct_4h"] < 0.12)
+            | (df["top_wick_pct_4h"] < 0.12)
+            | (df["change_pct_1h"] > -0.02)
+            | (df["rsi_14_1h"] < 50.0)
+            | (df["rsi_14_4h"] < 65.0)
+            | (df["rsi_14_max_6_4h"] < 80.0)
+            | (df["cti_20_4h"] < 0.8)
+          )
+          long_entry_logic.append(
+            (df["change_pct_1d"] > -0.12)
+            | (df["change_pct_1d"].shift(288) < 0.24)
+            | (df["sma_200_dec_48_1h"] == False)
+            | (df["ema_200_dec_48_1h"] == False)
+            | (df["ema_200_dec_24_4h"] == False)
+            | (df["ema_200_dec_4_1d"] == False)
+          )
+          long_entry_logic.append(
+            (df["not_downtrend_15m"])
+            | (df["rsi_3_15m"] > 30.0)
+            | (df["rsi_3_1h"] > 30.0)
+            | (df["rsi_14_1h"] < 40.0)
+            | (df["rsi_14_4h"] < 60.0)
+            | (df["r_480_1h"] > -70.0)
+            | (df["r_480_4h"] > -80.0)
+            | (df["ema_200_dec_24_4h"] == False)
+            | (df["ema_200_dec_4_1d"] == False)
+          )
+          long_entry_logic.append(
+            (df["change_pct_1d"] < 0.16)
+            | (df["change_pct_1h"] > -0.02)
+            | (df["rsi_14_1h"] < 60.0)
+            | (df["cti_20_1h"] < 0.9)
+            | (df["rsi_14_4h"] < 80.0)
+            | (df["r_480_1h"] < -35.0)
+          )
+          long_entry_logic.append(
+            (df["change_pct_4h"] > -0.06)
+            | (df["change_pct_4h"].shift(48) < 0.06)
+            | (df["change_pct_1h"] > -0.02)
+            | (df["rsi_14_4h"] < 46.0)
+            | (df["rsi_14_max_6_4h"] < 65.0)
+            | (df["cti_20_4h"] < 0.7)
+            | (df["r_480_1h"] > -70.0)
+          )
+          long_entry_logic.append(
+            (df["change_pct_4h"] < 0.06)
+            | (df["top_wick_pct_4h"] < 0.06)
+            | (df["change_pct_1h"] > -0.01)
+            | (df["rsi_14_1h"] < 50.0)
+            | (df["rsi_14_4h"] < 80.0)
+            | (df["close"] > (df["high_max_6_1h"] * 0.70))
+          )
+          long_entry_logic.append(
+            (df["change_pct_4h"] > -0.04)
+            | (df["not_downtrend_1h"])
+            | (df["not_downtrend_4h"])
+            | (df["rsi_3"] > 10.0)
+            | (df["rsi_3_1h"] > 30.0)
+            | (df["rsi_3_4h"] > 36.0)
+            | (df["rsi_14_max_6_1d"] < 80.0)
+          )
+          long_entry_logic.append(
+            (df["not_downtrend_15m"])
+            | (df["rsi_3"] > 20.0)
+            | (df["rsi_3_15m"] > 20.0)
+            | (df["rsi_14_15m"] < 30.0)
+            | (df["rsi_14_1h"] < 40.0)
+            | (df["rsi_14_4h"] < 50.0)
+            | (df["cti_20_4h"] < 0.8)
+            | (df["rsi_14_1d"] < 50.0)
+            | (df["r_480_1h"] < -30.0)
+            | (df["r_480_4h"] < -20.0)
+          )
+          long_entry_logic.append(
+            (df["change_pct_4h"] > -0.01)
+            | (df["change_pct_1h"] > -0.01)
+            | (df["rsi_3"] > 16.0)
+            | (df["rsi_14_15m"] < 36.0)
+            | (df["rsi_14_1h"] < 46.0)
+            | (df["rsi_14_4h"] < 50.0)
+            | (df["rsi_14_1d"] < 70.0)
+            | (df["r_480_1h"] < -25.0)
+            | (df["close"] > df["sup_level_1h"])
+            | (((df["close"] - df["low_min_48_1h"]) / df["low_min_48_1h"]) < (df["hl_pct_change_48_1h"] * 0.38))
+          )
+          long_entry_logic.append(
+            (df["change_pct_1d"] > -0.01)
+            | (df["rsi_3"] > 16.0)
+            | (df["rsi_3_15m"] > 26.0)
+            | (df["rsi_14_15m"] < 40.0)
+            | (df["rsi_14_1h"] < 46.0)
+            | (df["rsi_14_4h"] < 50.0)
+            | (df["rsi_14_1d"] < 60.0)
+            | (df["rsi_14_max_6_1d"] < 80.0)
+            | (df["r_480_1h"] < -30.0)
+          )
+          long_entry_logic.append(
+            (df["change_pct_4h"] > -0.02)
+            | (df["change_pct_1h"] > -0.02)
+            | (df["rsi_3"] > 10.0)
+            | (df["rsi_3_15m"] > 26.0)
+            | (df["rsi_3_1h"] > 20.0)
+            | (df["rsi_3_4h"] > 20.0)
+            | (df["r_480_1h"] > -95.0)
+            | (df["close"] > df["sup_level_1h"])
+            | (df["close"] > df["sup_level_4h"])
+            | (df["sma_200_dec_48_1h"] == False)
+            | (df["ema_200_dec_48_1h"] == False)
+            | (df["ema_200_dec_24_4h"] == False)
+          )
+          long_entry_logic.append(
+            (df["not_downtrend_15m"])
+            | (df["not_downtrend_1d"])
+            | (df["rsi_3"] > 10.0)
+            | (df["rsi_3_15m"] > 20.0)
+            | (df["rsi_14_15m"] < 36.0)
+            | (df["rsi_14_1h"] < 46.0)
+            | (df["rsi_14_4h"] < 46.0)
+            | (df["close"] > df["sup_level_1h"])
+            | (df["sma_200_dec_48_1h"] == False)
+            | (df["ema_200_dec_48_1h"] == False)
+          )
+          long_entry_logic.append(
+            (df["not_downtrend_1h"])
+            | (df["not_downtrend_4h"])
+            | (df["rsi_3"] > 12.0)
+            | (df["rsi_3_15m"] > 20.0)
+            | (df["rsi_3_1h"] > 30.0)
+            | (df["rsi_3_4h"] > 30.0)
+            | (df["r_480_1h"] > -65.0)
+            | (df["close"] > df["sup_level_1h"])
+            | (df["close"] > df["sup_level_4h"])
+            | (df["sma_200_dec_48_1h"] == False)
+            | (df["ema_200_dec_48_1h"] == False)
+          )
+          long_entry_logic.append(
+            (df["change_pct_1d"] > -0.04)
+            | (df["top_wick_pct_1d"] < 0.04)
+            | (df["change_pct_1d"].shift(288) < 0.24)
+            | (df["not_downtrend_1h"])
+            | (df["rsi_3"] > 20.0)
+            | (df["rsi_3_15m"] > 20.0)
+            | (df["rsi_14_15m"] < 36.0)
+            | (df["rsi_14_1h"] < 40.0)
+            | (df["rsi_14_4h"] < 40.0)
+            | (df["r_480_1h"] > -65.0)
+            | (df["sma_200_dec_48_1h"] == False)
+            | (df["ema_200_dec_48_1h"] == False)
+          )
+          long_entry_logic.append(
+            (df["change_pct_1d"] < 0.12)
+            | (df["top_wick_pct_1d"] < 0.12)
+            | (df["rsi_3"] > 8.0)
+            | (df["rsi_14_15m"] < 36.0)
+            | (df["rsi_14_1h"] < 40.0)
+            | (df["rsi_14_4h"] < 50.0)
+            | (df["cti_20_4h"] < 0.7)
+            | (df["ema_200_dec_24_4h"] == False)
+            | (df["ema_200_dec_4_1d"] == False)
+          )
+
+          # Logic
+          long_entry_logic.append(df["cti_20"] < -0.75)
+          long_entry_logic.append(df["r_14"] < -90.0)
+          long_entry_logic.append(df["close"] < (df["ema_20"] * 0.962))
+          long_entry_logic.append(df["close_15m"] < (df["ema_12_15m"] * 0.982))
 
         # Condition #21 - Pump mode (Long).
         if index == 21:
@@ -20619,6 +21433,41 @@ class NostalgiaForInfinityX4(IStrategy):
             | (df["r_480_1h"] < -35.0)
             | (df["r_480_4h"] > -60.0)
           )
+          long_entry_logic.append(
+            (df["rsi_14"] < 46.0)
+            | (df["rsi_14_15m"] < 46.0)
+            | (df["rsi_14_1h"] < 46.0)
+            | (df["rsi_14_4h"] < 46.0)
+            | (df["rsi_14_1d"] < 46.0)
+            | (df["ema_200_dec_48_1h"] == False)
+            | (df["ema_200_dec_24_4h"] == False)
+          )
+          long_entry_logic.append(
+            (df["is_downtrend_3_1d"] == False)
+            | (df["rsi_14"] < 40.0)
+            | (df["rsi_14_15m"] < 40.0)
+            | (df["rsi_14_1d"] < 50.0)
+            | (df["cti_20_1d"] < 0.7)
+            | (df["rsi_14_max_6_1d"] < 65.0)
+            | (df["r_480_1h"] < -35.0)
+          )
+          long_entry_logic.append(
+            (df["change_pct_1d"] > -0.04)
+            | (df["rsi_14"] < 40.0)
+            | (df["rsi_14_15m"] < 40.0)
+            | (df["rsi_14_1d"] < 50.0)
+            | (df["cti_20_1d"] < 0.7)
+            | (df["rsi_14_max_6_1d"] < 75.0)
+          )
+          long_entry_logic.append(
+            (df["rsi_14"] < 40.0)
+            | (df["rsi_14_15m"] < 46.0)
+            | (df["rsi_14_1h"] < 46.0)
+            | (df["rsi_14_4h"] < 46.0)
+            | (df["rsi_14_1d"] < 46.0)
+            | (df["close"] > df["sup_level_1h"])
+            | (df["hl_pct_change_6_1d"] > 0.25)
+          )
 
           # Logic
           long_entry_logic.append(df["rsi_14"] < self.entry_46_rsi_14_max.value)
@@ -21011,7 +21860,7 @@ class NostalgiaForInfinityX4(IStrategy):
 
           # Logic
           long_entry_logic.append(df["rsi_14"] < 32.0)
-          long_entry_logic.append(df["close"] < (df["ema_26"] * 0.972))
+          long_entry_logic.append(df["close"] < (df["ema_26"] * 0.970))
 
         # Condition #52 - Quick mode (Long).
         if index == 52:
@@ -21279,6 +22128,16 @@ class NostalgiaForInfinityX4(IStrategy):
             | (df["rsi_14_4h"] < 50.0)
             | (df["r_480_1h"] < -35.0)
             | (df["ema_200_dec_4_1d"] == False)
+          )
+          long_entry_logic.append(
+            (df["rsi_14"] > df["rsi_14"].shift(12))
+            | (df["rsi_14_15m"] > df["rsi_14_15m"].shift(12))
+            | (df["rsi_14_15m"] < 40.0)
+            | (df["rsi_14_1h"] < 60.0)
+            | (df["rsi_14_4h"] < 60.0)
+            | (df["r_14_1h"] < -25.0)
+            | (df["r_14_4h"] < -25.0)
+            | (df["ema_200_dec_24_4h"] == False)
           )
 
           # Logic
@@ -22033,16 +22892,27 @@ class NostalgiaForInfinityX4(IStrategy):
           short_entry_logic.append(df["close"] > (df["bb20_2_upp"] * 1.012))
           short_entry_logic.append(df["rsi_14"] > 64.0)
 
-        # Condition #500 - Rapid mode (Short).
+        # Condition #501 - Normal mode (Short)
         if short_index == 501:
           # Protections
-          # short_entry_logic.append(df["global_protections_long_pump"] == False)
-          # short_entry_logic.append(df["global_protections_long_dump"] == False)
-          # short_entry_logic.append(df["btc_pct_close_max_24_5m"] < 0.03)
-          # short_entry_logic.append(df["btc_pct_close_max_72_5m"] < 0.03)
+          short_entry_logic.append(df["protections_short_global"] == True)
+          short_entry_logic.append(df["global_protections_short_pump"] == True)
+          short_entry_logic.append(df["global_protections_short_dump"] == True)
+          short_entry_logic.append(df["num_empty_288"] < allowed_empty_candles)
+
+          short_entry_logic.append(df["rsi_3"] <= 98.0)
+          short_entry_logic.append(df["rsi_3"] >= 54.0)
+          short_entry_logic.append(df["rsi_3_15m"] <= 88.0)
+          short_entry_logic.append(df["rsi_3_1h"] <= 88.0)
+          short_entry_logic.append(df["rsi_3_4h"] <= 88.0)
+          short_entry_logic.append(df["rsi_14_1d"] > 15.0)
+          short_entry_logic.append(df["r_14_4h"] > -84.0)
 
           # Logic
-          short_entry_logic.append(df["buy_short2"] > 0)
+          short_entry_logic.append(df["cti_20"] > 0.75)
+          short_entry_logic.append(df["r_14"] > -10.0)
+          short_entry_logic.append(df["close"] > (df["ema_20"] * 1.040))
+          short_entry_logic.append(df["close_15m"] > (df["ema_12_15m"] * 1.020))
 
         # Short Entry Conditions Ends Here
 
@@ -29278,6 +30148,9 @@ class NostalgiaForInfinityX4(IStrategy):
     )
     is_grind_mode = all(c in self.long_grind_mode_tags for c in enter_tags)
 
+    fee_open_rate = trade.fee_open if self.custom_fee_open_rate is None else self.custom_fee_open_rate
+    fee_close_rate = trade.fee_close if self.custom_fee_close_rate is None else self.custom_fee_close_rate
+
     # Rebuy mode
     if is_rebuy_mode:
       slice_amount /= self.rebuy_mode_stake_multiplier
@@ -29841,9 +30714,9 @@ class NostalgiaForInfinityX4(IStrategy):
         first_entry_distance_ratio = (exit_rate - first_entry.safe_price) / first_entry.safe_price
         # First entry exit
         if first_entry_distance_ratio > (
-          self.grind_mode_first_entry_profit_threshold_spot
+          (self.grind_mode_first_entry_profit_threshold_spot + fee_open_rate + fee_close_rate)
           if self.is_futures_mode
-          else self.grind_mode_first_entry_profit_threshold_spot
+          else (self.grind_mode_first_entry_profit_threshold_spot + fee_open_rate + fee_close_rate)
         ):
           sell_amount = first_entry.safe_filled * exit_rate / trade.leverage
           if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
@@ -29918,7 +30791,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit < -0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit < -0.03))
+        # and ((num_open_grinds == 0) or (slice_profit < -0.03))
         and (
           (last_candle["protections_long_rebuy"] == True)
           and (last_candle["protections_long_global"] == True)
@@ -29983,7 +30856,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_1_derisk_1_sub_grind_count > 0:
       grind_profit = (exit_rate - grind_1_derisk_1_current_open_rate) / grind_1_derisk_1_current_open_rate
-      if grind_profit > grind_1_derisk_1_profit_threshold:
+      if grind_profit > (grind_1_derisk_1_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_1_derisk_1_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -30055,7 +30928,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit < -0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit < -0.03))
+        # and ((num_open_grinds == 0) or (slice_profit < -0.03))
         and (
           (last_candle["protections_long_rebuy"] == True)
           and (last_candle["protections_long_global"] == True)
@@ -30130,7 +31003,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_2_derisk_1_sub_grind_count > 0:
       grind_profit = (exit_rate - grind_2_derisk_1_current_open_rate) / grind_2_derisk_1_current_open_rate
-      if grind_profit > grind_2_derisk_1_profit_threshold:
+      if grind_profit > (grind_2_derisk_1_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_2_derisk_1_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -30201,7 +31074,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit < -0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit < -0.03))
+        # and ((num_open_grinds == 0) or (slice_profit < -0.03))
         and (
           (last_candle["protections_long_rebuy"] == True)
           and (last_candle["protections_long_global"] == True)
@@ -30330,7 +31203,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_1_sub_grind_count > 0:
       grind_profit = (exit_rate - grind_1_current_open_rate) / grind_1_current_open_rate
-      if grind_profit > grind_1_profit_threshold:
+      if grind_profit > (grind_1_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_1_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -30406,7 +31279,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit < -0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit < -0.03))
+        # and ((num_open_grinds == 0) or (slice_profit < -0.03))
         and (
           (last_candle["protections_long_rebuy"] == True)
           and (last_candle["protections_long_global"] == True)
@@ -30503,7 +31376,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_2_sub_grind_count > 0:
       grind_profit = (exit_rate - grind_2_current_open_rate) / grind_2_current_open_rate
-      if grind_profit > grind_2_profit_threshold:
+      if grind_profit > (grind_2_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_2_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -30579,7 +31452,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit < -0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit < -0.03))
+        # and ((num_open_grinds == 0) or (slice_profit < -0.03))
         and (
           (last_candle["protections_long_rebuy"] == True)
           and (last_candle["protections_long_global"] == True)
@@ -30676,7 +31549,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_3_sub_grind_count > 0:
       grind_profit = (exit_rate - grind_3_current_open_rate) / grind_3_current_open_rate
-      if grind_profit > grind_3_profit_threshold:
+      if grind_profit > (grind_3_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_3_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -30752,7 +31625,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit < -0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit < -0.03))
+        # and ((num_open_grinds == 0) or (slice_profit < -0.03))
         and (
           (last_candle["protections_long_rebuy"] == True)
           and (last_candle["protections_long_global"] == True)
@@ -30849,7 +31722,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_4_sub_grind_count > 0:
       grind_profit = (exit_rate - grind_4_current_open_rate) / grind_4_current_open_rate
-      if grind_profit > grind_4_profit_threshold:
+      if grind_profit > (grind_4_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_4_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -30925,7 +31798,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit < -0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit < -0.03))
+        # and ((num_open_grinds == 0) or (slice_profit < -0.03))
         and (
           (last_candle["protections_long_rebuy"] == True)
           and (last_candle["protections_long_global"] == True)
@@ -31022,7 +31895,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_5_sub_grind_count > 0:
       grind_profit = (exit_rate - grind_5_current_open_rate) / grind_5_current_open_rate
-      if grind_profit > grind_5_profit_threshold:
+      if grind_profit > (grind_5_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_5_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -31098,7 +31971,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit < -0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit < -0.03))
+        # and ((num_open_grinds == 0) or (slice_profit < -0.03))
         and (
           (last_candle["protections_long_rebuy"] == True)
           and (last_candle["protections_long_global"] == True)
@@ -31195,7 +32068,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_6_sub_grind_count > 0:
       grind_profit = (exit_rate - grind_6_current_open_rate) / grind_6_current_open_rate
-      if grind_profit > grind_6_profit_threshold:
+      if grind_profit > (grind_6_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_6_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -31277,7 +32150,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit < -0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit < -0.03))
+        # and ((num_open_grinds == 0) or (slice_profit < -0.03))
         and (
           (last_candle["protections_long_rebuy"] == True)
           and (last_candle["protections_long_global"] == True)
@@ -32087,6 +32960,9 @@ class NostalgiaForInfinityX4(IStrategy):
       + grind_5_sub_grind_count
     )
 
+    fee_open_rate = trade.fee_open if self.custom_fee_open_rate is None else self.custom_fee_open_rate
+    fee_close_rate = trade.fee_close if self.custom_fee_close_rate is None else self.custom_fee_close_rate
+
     # Sell remaining if partial fill on exit
     if partial_sell:
       order = filled_exits[-1]
@@ -32168,7 +33044,7 @@ class NostalgiaForInfinityX4(IStrategy):
         order_tag = "r"
         return buy_amount, order_tag, is_derisk
 
-    # Gringing g1
+    # Grinding g1
     # Grinding entry
     if has_order_tags and (not partial_sell) and (grind_1_sub_grind_count < max_grind_1_sub_grinds):
       if (
@@ -32183,7 +33059,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit < -0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit < -0.03))
+        # and ((num_open_grinds == 0) or (slice_profit < -0.03))
         and (
           (last_candle["protections_long_rebuy"] == True)
           and (last_candle["protections_long_global"] == True)
@@ -32292,7 +33168,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Grinding Exit
     if has_order_tags and grind_1_sub_grind_count > 0:
       grind_profit = (exit_rate - grind_1_current_open_rate) / grind_1_current_open_rate
-      if grind_profit > regular_mode_grind_1_profit_threshold:
+      if grind_profit > (regular_mode_grind_1_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_1_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -32342,7 +33218,7 @@ class NostalgiaForInfinityX4(IStrategy):
           order_tag += " " + str(grind_entry_id)
         return -ft_sell_amount, order_tag, is_derisk
 
-    # Gringing g2
+    # Grinding g2
     # Grinding entry
     if has_order_tags and (not partial_sell) and (grind_2_sub_grind_count < max_grind_2_sub_grinds):
       if (
@@ -32357,7 +33233,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit < -0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit < -0.03))
+        # and ((num_open_grinds == 0) or (slice_profit < -0.03))
         and (
           (last_candle["protections_long_rebuy"] == True)
           and (last_candle["protections_long_global"] == True)
@@ -32436,7 +33312,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Grinding Exit
     if has_order_tags and grind_2_sub_grind_count > 0:
       grind_profit = (exit_rate - grind_2_current_open_rate) / grind_2_current_open_rate
-      if grind_profit > regular_mode_grind_2_profit_threshold:
+      if grind_profit > (regular_mode_grind_2_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_2_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -32486,7 +33362,7 @@ class NostalgiaForInfinityX4(IStrategy):
           order_tag += " " + str(grind_entry_id)
         return -ft_sell_amount, order_tag, is_derisk
 
-    # Gringing g3
+    # Grinding g3
     # Grinding entry
     if has_order_tags and (not partial_sell) and (grind_3_sub_grind_count < max_grind_3_sub_grinds):
       if (
@@ -32501,7 +33377,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit < -0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit < -0.03))
+        # and ((num_open_grinds == 0) or (slice_profit < -0.03))
         and (
           (last_candle["protections_long_rebuy"] == True)
           and (last_candle["protections_long_global"] == True)
@@ -32551,6 +33427,16 @@ class NostalgiaForInfinityX4(IStrategy):
             and (last_candle["rsi_14"] < 36.0)
             and (last_candle["close"] < (last_candle["ema_26"] * 0.988))
           )
+          or (
+            (num_open_grinds == 0)
+            and (last_candle["rsi_3"] > 12.0)
+            and (last_candle["rsi_3_15m"] > 16.0)
+            and (last_candle["rsi_3_1h"] > 16.0)
+            and (last_candle["rsi_3_4h"] > 16.0)
+            and (last_candle["rsi_14_15m"] < 40.0)
+            and (previous_candle["chandelier_dir"] < -0)
+            and (last_candle["chandelier_dir"] > 0)
+          )
         )
       ):
         buy_amount = (
@@ -32579,7 +33465,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Grinding Exit
     if has_order_tags and grind_3_sub_grind_count > 0:
       grind_profit = (exit_rate - grind_3_current_open_rate) / grind_3_current_open_rate
-      if grind_profit > regular_mode_grind_3_profit_threshold:
+      if grind_profit > (regular_mode_grind_3_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_3_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -32629,7 +33515,7 @@ class NostalgiaForInfinityX4(IStrategy):
           order_tag += " " + str(grind_entry_id)
         return -ft_sell_amount, order_tag, is_derisk
 
-    # Gringing g4
+    # Grinding g4
     # Grinding entry
     if has_order_tags and (not partial_sell) and (grind_4_sub_grind_count < max_grind_4_sub_grinds):
       if (
@@ -32644,7 +33530,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit < -0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit < -0.03))
+        # and ((num_open_grinds == 0) or (slice_profit < -0.03))
         and (
           (last_candle["protections_long_rebuy"] == True)
           and (last_candle["protections_long_global"] == True)
@@ -32722,7 +33608,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Grinding Exit
     if has_order_tags and grind_4_sub_grind_count > 0:
       grind_profit = (exit_rate - grind_4_current_open_rate) / grind_4_current_open_rate
-      if grind_profit > regular_mode_grind_4_profit_threshold:
+      if grind_profit > (regular_mode_grind_4_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_4_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -32772,7 +33658,7 @@ class NostalgiaForInfinityX4(IStrategy):
           order_tag += " " + str(grind_entry_id)
         return -ft_sell_amount, order_tag, is_derisk
 
-    # Gringing g5
+    # Grinding g5
     # Grinding entry
     if has_order_tags and (not partial_sell) and (grind_5_sub_grind_count < max_grind_5_sub_grinds):
       if (
@@ -32787,7 +33673,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit < -0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit < -0.03))
+        # and ((num_open_grinds == 0) or (slice_profit < -0.03))
         and (
           (last_candle["protections_long_rebuy"] == True)
           and (last_candle["protections_long_global"] == True)
@@ -32865,7 +33751,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Grinding Exit
     if has_order_tags and grind_5_sub_grind_count > 0:
       grind_profit = (exit_rate - grind_5_current_open_rate) / grind_5_current_open_rate
-      if grind_profit > regular_mode_grind_5_profit_threshold:
+      if grind_profit > (regular_mode_grind_5_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_5_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -32952,6 +33838,7 @@ class NostalgiaForInfinityX4(IStrategy):
             self.regular_mode_derisk_1_futures_old if self.is_futures_mode else self.regular_mode_derisk_1_spot_old
           )
         )
+        / (trade.leverage if self.is_futures_mode else 1.0)
       )
     ):
       sell_amount = trade.amount * exit_rate / trade.leverage - (min_stake * 1.55)
@@ -40243,6 +41130,9 @@ class NostalgiaForInfinityX4(IStrategy):
     )
     is_grind_mode = all(c in self.short_grind_mode_tags for c in enter_tags)
 
+    fee_open_rate = trade.fee_open if self.custom_fee_open_rate is None else self.custom_fee_open_rate
+    fee_close_rate = trade.fee_close if self.custom_fee_close_rate is None else self.custom_fee_close_rate
+
     # Rebuy mode
     if is_rebuy_mode:
       slice_amount /= self.rebuy_mode_stake_multiplier
@@ -40308,7 +41198,7 @@ class NostalgiaForInfinityX4(IStrategy):
       self.grind_1_sub_thresholds_futures if self.is_futures_mode else self.grind_1_sub_thresholds_spot
     )
     if (slice_amount * grind_1_stakes[0] / (trade.leverage if self.is_futures_mode else 1.0)) < min_stake:
-      multi = slice_amount / min_stake
+      multi = min_stake / slice_amount / grind_1_stakes[0]
       for i, _ in enumerate(grind_1_stakes):
         grind_1_stakes[i] *= multi
     grind_1_max_sub_grinds = len(grind_1_stakes)
@@ -40323,7 +41213,7 @@ class NostalgiaForInfinityX4(IStrategy):
       self.grind_2_sub_thresholds_futures if self.is_futures_mode else self.grind_2_sub_thresholds_spot
     )
     if (slice_amount * grind_2_stakes[0] / (trade.leverage if self.is_futures_mode else 1.0)) < min_stake:
-      multi = slice_amount / min_stake
+      multi = min_stake / slice_amount / grind_2_stakes[0]
       for i, _ in enumerate(grind_2_stakes):
         grind_2_stakes[i] *= multi
     grind_2_max_sub_grinds = len(grind_2_stakes)
@@ -40338,7 +41228,7 @@ class NostalgiaForInfinityX4(IStrategy):
       self.grind_3_sub_thresholds_futures if self.is_futures_mode else self.grind_3_sub_thresholds_spot
     )
     if (slice_amount * grind_3_stakes[0] / (trade.leverage if self.is_futures_mode else 1.0)) < min_stake:
-      multi = slice_amount / min_stake
+      multi = min_stake / slice_amount / grind_3_stakes[0]
       for i, _ in enumerate(grind_3_stakes):
         grind_3_stakes[i] *= multi
     grind_3_max_sub_grinds = len(grind_3_stakes)
@@ -40353,7 +41243,7 @@ class NostalgiaForInfinityX4(IStrategy):
       self.grind_4_sub_thresholds_futures if self.is_futures_mode else self.grind_4_sub_thresholds_spot
     )
     if (slice_amount * grind_4_stakes[0] / (trade.leverage if self.is_futures_mode else 1.0)) < min_stake:
-      multi = slice_amount / min_stake
+      multi = min_stake / slice_amount / grind_4_stakes[0]
       for i, _ in enumerate(grind_4_stakes):
         grind_4_stakes[i] *= multi
     grind_4_max_sub_grinds = len(grind_4_stakes)
@@ -40368,7 +41258,7 @@ class NostalgiaForInfinityX4(IStrategy):
       self.grind_5_sub_thresholds_futures if self.is_futures_mode else self.grind_5_sub_thresholds_spot
     )
     if (slice_amount * grind_5_stakes[0] / (trade.leverage if self.is_futures_mode else 1.0)) < min_stake:
-      multi = slice_amount / min_stake
+      multi = min_stake / slice_amount / grind_5_stakes[0]
       for i, _ in enumerate(grind_5_stakes):
         grind_5_stakes[i] *= multi
     grind_5_max_sub_grinds = len(grind_5_stakes)
@@ -40383,7 +41273,7 @@ class NostalgiaForInfinityX4(IStrategy):
       self.grind_6_sub_thresholds_futures if self.is_futures_mode else self.grind_6_sub_thresholds_spot
     )
     if (slice_amount * grind_6_stakes[0] / (trade.leverage if self.is_futures_mode else 1.0)) < min_stake:
-      multi = slice_amount / min_stake
+      multi = min_stake / slice_amount / grind_6_stakes[0]
       for i, _ in enumerate(grind_6_stakes):
         grind_6_stakes[i] *= multi
     grind_6_max_sub_grinds = len(grind_6_stakes)
@@ -40402,7 +41292,7 @@ class NostalgiaForInfinityX4(IStrategy):
       else self.grind_1_derisk_1_sub_thresholds_spot
     )
     if (slice_amount * grind_1_derisk_1_stakes[0] / (trade.leverage if self.is_futures_mode else 1.0)) < min_stake:
-      multi = slice_amount / min_stake
+      multi = min_stake / slice_amount / grind_1_derisk_1_stakes[0]
       for i, _ in enumerate(grind_1_derisk_1_stakes):
         grind_1_derisk_1_stakes[i] *= multi
     grind_1_derisk_1_max_sub_grinds = len(grind_1_derisk_1_stakes)
@@ -40425,7 +41315,7 @@ class NostalgiaForInfinityX4(IStrategy):
       else self.grind_2_derisk_1_sub_thresholds_spot
     )
     if (slice_amount * grind_2_derisk_1_stakes[0] / (trade.leverage if self.is_futures_mode else 1.0)) < min_stake:
-      multi = slice_amount / min_stake
+      multi = min_stake / slice_amount / grind_2_derisk_1_stakes[0]
       for i, _ in enumerate(grind_2_derisk_1_stakes):
         grind_2_derisk_1_stakes[i] *= multi
     grind_2_derisk_1_max_sub_grinds = len(grind_2_derisk_1_stakes)
@@ -40793,9 +41683,9 @@ class NostalgiaForInfinityX4(IStrategy):
         first_entry_distance_ratio = -(exit_rate - first_entry.safe_price) / first_entry.safe_price
         # First entry exit
         if first_entry_distance_ratio > (
-          self.grind_mode_first_entry_profit_threshold_spot
+          (self.grind_mode_first_entry_profit_threshold_spot + fee_open_rate + fee_close_rate)
           if self.is_futures_mode
-          else self.grind_mode_first_entry_profit_threshold_spot
+          else (self.grind_mode_first_entry_profit_threshold_spot + fee_open_rate + fee_close_rate)
         ):
           sell_amount = first_entry.safe_filled * exit_rate / trade.leverage
           if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
@@ -40870,7 +41760,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit > 0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit > 0.03))
+        # and ((num_open_grinds == 0) or (slice_profit > 0.03))
         and (
           (last_candle["protections_short_rebuy"] == True)
           and (last_candle["protections_short_global"] == True)
@@ -40935,7 +41825,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_1_derisk_1_sub_grind_count > 0:
       grind_profit = -(exit_rate - grind_1_derisk_1_current_open_rate) / grind_1_derisk_1_current_open_rate
-      if grind_profit > grind_1_derisk_1_profit_threshold:
+      if grind_profit > (grind_1_derisk_1_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_1_derisk_1_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -41007,7 +41897,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit > 0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit > 0.03))
+        # and ((num_open_grinds == 0) or (slice_profit > 0.03))
         and (
           (last_candle["protections_short_rebuy"] == True)
           and (last_candle["protections_short_global"] == True)
@@ -41082,7 +41972,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_2_derisk_1_sub_grind_count > 0:
       grind_profit = -(exit_rate - grind_2_derisk_1_current_open_rate) / grind_2_derisk_1_current_open_rate
-      if grind_profit > grind_2_derisk_1_profit_threshold:
+      if grind_profit > (grind_2_derisk_1_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_2_derisk_1_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -41153,7 +42043,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit > 0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit > 0.03))
+        # and ((num_open_grinds == 0) or (slice_profit > 0.03))
         and (
           (last_candle["protections_short_rebuy"] == True)
           and (last_candle["protections_short_global"] == True)
@@ -41279,7 +42169,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_1_sub_grind_count > 0:
       grind_profit = -(exit_rate - grind_1_current_open_rate) / grind_1_current_open_rate
-      if grind_profit > grind_1_profit_threshold:
+      if grind_profit > (grind_1_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_1_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -41355,7 +42245,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit > 0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit > 0.03))
+        # and ((num_open_grinds == 0) or (slice_profit > 0.03))
         and (
           (last_candle["protections_short_rebuy"] == True)
           and (last_candle["protections_short_global"] == True)
@@ -41449,7 +42339,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_2_sub_grind_count > 0:
       grind_profit = -(exit_rate - grind_2_current_open_rate) / grind_2_current_open_rate
-      if grind_profit > grind_2_profit_threshold:
+      if grind_profit > (grind_2_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_2_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -41525,7 +42415,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit > 0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit > 0.03))
+        # and ((num_open_grinds == 0) or (slice_profit > 0.03))
         and (
           (last_candle["protections_short_rebuy"] == True)
           and (last_candle["protections_short_global"] == True)
@@ -41619,7 +42509,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_3_sub_grind_count > 0:
       grind_profit = -(exit_rate - grind_3_current_open_rate) / grind_3_current_open_rate
-      if grind_profit > grind_3_profit_threshold:
+      if grind_profit > (grind_3_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_3_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -41695,7 +42585,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit > 0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit > 0.03))
+        # and ((num_open_grinds == 0) or (slice_profit > 0.03))
         and (
           (last_candle["protections_short_rebuy"] == True)
           and (last_candle["protections_short_global"] == True)
@@ -41789,7 +42679,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_4_sub_grind_count > 0:
       grind_profit = -(exit_rate - grind_4_current_open_rate) / grind_4_current_open_rate
-      if grind_profit > grind_4_profit_threshold:
+      if grind_profit > (grind_4_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_4_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -41865,7 +42755,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit > 0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit > 0.03))
+        # and ((num_open_grinds == 0) or (slice_profit > 0.03))
         and (
           (last_candle["protections_short_rebuy"] == True)
           and (last_candle["protections_short_global"] == True)
@@ -41959,7 +42849,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_5_sub_grind_count > 0:
       grind_profit = -(exit_rate - grind_5_current_open_rate) / grind_5_current_open_rate
-      if grind_profit > grind_5_profit_threshold:
+      if grind_profit > (grind_5_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_5_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -42035,7 +42925,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit > 0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit > 0.03))
+        # and ((num_open_grinds == 0) or (slice_profit > 0.03))
         and (
           (last_candle["protections_short_rebuy"] == True)
           and (last_candle["protections_short_global"] == True)
@@ -42129,7 +43019,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Sell
     if grind_6_sub_grind_count > 0:
       grind_profit = -(exit_rate - grind_6_current_open_rate) / grind_6_current_open_rate
-      if grind_profit > grind_6_profit_threshold:
+      if grind_profit > (grind_6_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_6_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -42211,7 +43101,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit > 0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit > 0.03))
+        # and ((num_open_grinds == 0) or (slice_profit > 0.03))
         and (
           (last_candle["protections_short_rebuy"] == True)
           and (last_candle["protections_short_global"] == True)
@@ -43005,6 +43895,9 @@ class NostalgiaForInfinityX4(IStrategy):
       + grind_5_sub_grind_count
     )
 
+    fee_open_rate = trade.fee_open if self.custom_fee_open_rate is None else self.custom_fee_open_rate
+    fee_close_rate = trade.fee_close if self.custom_fee_close_rate is None else self.custom_fee_close_rate
+
     # Sell remaining if partial fill on exit
     if partial_sell:
       order = filled_exits[-1]
@@ -43085,7 +43978,7 @@ class NostalgiaForInfinityX4(IStrategy):
         order_tag = "r"
         return buy_amount, order_tag, is_derisk
 
-    # Gringing g1
+    # Grinding g1
     # Grinding entry
     if has_order_tags and (not partial_sell) and (grind_1_sub_grind_count < max_grind_1_sub_grinds):
       if (
@@ -43100,7 +43993,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit > 0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit > 0.03))
+        # and ((num_open_grinds == 0) or (slice_profit > 0.03))
         and (
           (last_candle["protections_short_rebuy"] == True)
           and (last_candle["protections_short_global"] == True)
@@ -43206,7 +44099,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Grinding Exit
     if has_order_tags and grind_1_sub_grind_count > 0:
       grind_profit = -(exit_rate - grind_1_current_open_rate) / grind_1_current_open_rate
-      if grind_profit > regular_mode_grind_1_profit_threshold:
+      if grind_profit > (regular_mode_grind_1_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_1_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -43223,7 +44116,7 @@ class NostalgiaForInfinityX4(IStrategy):
             order_tag += " " + str(grind_entry_id)
           return -ft_sell_amount, order_tag, is_derisk
 
-    # Gringing g2
+    # Grinding g2
     # Grinding entry
     if has_order_tags and (not partial_sell) and (grind_2_sub_grind_count < max_grind_2_sub_grinds):
       if (
@@ -43238,7 +44131,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit > 0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit > 0.03))
+        # and ((num_open_grinds == 0) or (slice_profit > 0.03))
         and (
           (last_candle["protections_short_rebuy"] == True)
           and (last_candle["protections_short_global"] == True)
@@ -43314,7 +44207,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Grinding Exit
     if has_order_tags and grind_2_sub_grind_count > 0:
       grind_profit = -(exit_rate - grind_2_current_open_rate) / grind_2_current_open_rate
-      if grind_profit > regular_mode_grind_2_profit_threshold:
+      if grind_profit > (regular_mode_grind_2_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_2_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -43331,7 +44224,7 @@ class NostalgiaForInfinityX4(IStrategy):
             order_tag += " " + str(grind_entry_id)
           return -ft_sell_amount, order_tag, is_derisk
 
-    # Gringing g3
+    # Grinding g3
     # Grinding entry
     if has_order_tags and (not partial_sell) and (grind_3_sub_grind_count < max_grind_3_sub_grinds):
       if (
@@ -43346,7 +44239,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit > 0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit > 0.03))
+        # and ((num_open_grinds == 0) or (slice_profit > 0.03))
         and (
           (last_candle["protections_short_rebuy"] == True)
           and (last_candle["protections_short_global"] == True)
@@ -43394,6 +44287,16 @@ class NostalgiaForInfinityX4(IStrategy):
             and (last_candle["rsi_14"] > 64.0)
             and (last_candle["close"] > (last_candle["ema_26"] * 1.012))
           )
+          or (
+            (num_open_grinds == 0)
+            and (last_candle["rsi_3"] < 88.0)
+            and (last_candle["rsi_3_15m"] < 84.0)
+            and (last_candle["rsi_3_1h"] < 84.0)
+            and (last_candle["rsi_3_4h"] < 84.0)
+            and (last_candle["rsi_14_15m"] > 60.0)
+            and (previous_candle["chandelier_dir"] > 0)
+            and (last_candle["chandelier_dir"] < -0)
+          )
         )
       ):
         buy_amount = (
@@ -43422,7 +44325,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Grinding Exit
     if has_order_tags and grind_3_sub_grind_count > 0:
       grind_profit = -(exit_rate - grind_3_current_open_rate) / grind_3_current_open_rate
-      if grind_profit > regular_mode_grind_3_profit_threshold:
+      if grind_profit > (regular_mode_grind_3_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_3_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -43439,7 +44342,7 @@ class NostalgiaForInfinityX4(IStrategy):
             order_tag += " " + str(grind_entry_id)
           return -ft_sell_amount, order_tag, is_derisk
 
-    # Gringing g4
+    # Grinding g4
     # Grinding entry
     if has_order_tags and (not partial_sell) and (grind_4_sub_grind_count < max_grind_4_sub_grinds):
       if (
@@ -43454,7 +44357,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit > 0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit > 0.03))
+        # and ((num_open_grinds == 0) or (slice_profit > 0.03))
         and (
           (last_candle["protections_short_rebuy"] == True)
           and (last_candle["protections_short_global"] == True)
@@ -43530,7 +44433,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Grinding Exit
     if has_order_tags and grind_4_sub_grind_count > 0:
       grind_profit = -(exit_rate - grind_4_current_open_rate) / grind_4_current_open_rate
-      if grind_profit > regular_mode_grind_4_profit_threshold:
+      if grind_profit > (regular_mode_grind_4_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_4_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
@@ -43547,7 +44450,7 @@ class NostalgiaForInfinityX4(IStrategy):
             order_tag += " " + str(grind_entry_id)
           return -ft_sell_amount, order_tag, is_derisk
 
-    # Gringing g5
+    # Grinding g5
     # Grinding entry
     if has_order_tags and (not partial_sell) and (grind_5_sub_grind_count < max_grind_5_sub_grinds):
       if (
@@ -43562,7 +44465,7 @@ class NostalgiaForInfinityX4(IStrategy):
           or (current_time - timedelta(hours=6) > filled_orders[-1].order_filled_utc)
           or (slice_profit > 0.06)
         )
-        and ((num_open_grinds == 0) or (slice_profit > 0.03))
+        # and ((num_open_grinds == 0) or (slice_profit > 0.03))
         and (
           (last_candle["protections_short_rebuy"] == True)
           and (last_candle["protections_short_global"] == True)
@@ -43638,7 +44541,7 @@ class NostalgiaForInfinityX4(IStrategy):
     # Grinding Exit
     if has_order_tags and grind_5_sub_grind_count > 0:
       grind_profit = -(exit_rate - grind_5_current_open_rate) / grind_5_current_open_rate
-      if grind_profit > regular_mode_grind_5_profit_threshold:
+      if grind_profit > (regular_mode_grind_5_profit_threshold + fee_open_rate + fee_close_rate):
         sell_amount = grind_5_total_amount * exit_rate / trade.leverage
         if ((current_stake_amount / trade.leverage) - sell_amount) < (min_stake * 1.55):
           sell_amount = (trade.amount * exit_rate / trade.leverage) - (min_stake * 1.55)
